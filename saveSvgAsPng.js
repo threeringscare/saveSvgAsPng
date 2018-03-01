@@ -272,86 +272,54 @@
     var xmlns = "http://www.w3.org/2000/xmlns/";
 
     inlineImages(el, function() {
-      var outer = document.createElement("div");
-      var clone = el.cloneNode(true);
-      var width, height;
-      if(el.tagName == 'svg') {
-        width = options.width || getDimension(el, clone, 'width');
-        height = options.height || getDimension(el, clone, 'height');
-      } else if(el.getBBox) {
-        var box = el.getBBox();
-        width = box.x + box.width;
-        height = box.y + box.height;
-        clone.setAttribute('transform', clone.getAttribute('transform').replace(/translate\(.*?\)/, ''));
+      var xmlDoc = document.implementation.createDocument(
+        'http://www.w3.org/2000/svg', 'svg', null);
 
-        var svg = document.createElementNS('http://www.w3.org/2000/svg','svg')
-        svg.appendChild(clone)
-        clone = svg;
-      } else {
-        console.error('Attempted to render non-SVG element', el);
-        return;
-      }
+      var svgRoot = xmlDoc.documentElement;
 
-      clone.setAttribute("version", "1.1");
-      if (!clone.getAttribute('xmlns')) {
-        clone.setAttributeNS(xmlns, "xmlns", "http://www.w3.org/2000/svg");
+      if (el.tagName !== 'svg') {
+        throw Error("Root element must be 'svg'");
       }
-      if (!clone.getAttribute('xmlns:xlink')) {
-        clone.setAttributeNS(xmlns, "xmlns:xlink", "http://www.w3.org/1999/xlink");
-      }
+      var svgClone = el.cloneNode(true);
+      var width = options.width || getDimension(el, svgClone, 'width');
+      var height = options.height || getDimension(el, svgClone, 'height');
+
+      xmlDoc.replaceChild(svgClone, svgRoot);
+      svgRoot = svgClone;
+
+      var styleElement = xmlDoc.createElementNS(
+        'http://www.w3.org/2000/svg', 'style');
+      var cdataElement = xmlDoc.createCDATASection(options.svgStylesheet);
+      styleElement.appendChild(cdataElement);
+      svgRoot.insertBefore(styleElement, svgRoot.firstChild);
 
       if (options.responsive) {
-        clone.removeAttribute('width');
-        clone.removeAttribute('height');
-        clone.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+        svgRoot.removeAttribute('width');
+        svgRoot.removeAttribute('height');
+        svgRoot.setAttribute('preserveAspectRatio', 'xMinYMin meet');
       } else {
-        clone.setAttribute("width", width * options.scale);
-        clone.setAttribute("height", height * options.scale);
+        svgRoot.setAttribute("width", width * options.scale);
+        svgRoot.setAttribute("height", height * options.scale);
       }
 
-      clone.setAttribute("viewBox", [
+
+      svgRoot.setAttribute("viewBox", [
         options.left || 0,
         options.top || 0,
         width,
         height
       ].join(" "));
 
-      var fos = clone.querySelectorAll('foreignObject > *');
-      for (var i = 0; i < fos.length; i++) {
-        if (!fos[i].getAttribute('xmlns')) {
-          fos[i].setAttributeNS(xmlns, "xmlns", "http://www.w3.org/1999/xhtml");
-        }
-      }
-
-      outer.appendChild(clone);
-
-      // In case of custom fonts we need to fetch font first, and then inline
-      // its url into data-uri format (encode as base64). That's why style
-      // processing is done asynchonously. Once all inlining is finshed
-      // cssLoadedCallback() is called.
-      styles(el, options, cssLoadedCallback);
-
-      function cssLoadedCallback(css) {
-        // here all fonts are inlined, so that we can render them properly.
-        var s = document.createElement('style');
-        s.setAttribute('type', 'text/css');
-        s.innerHTML = "<![CDATA[\n" + css + "\n]]>";
-        var defs = document.createElement('defs');
-        defs.appendChild(s);
-        clone.insertBefore(defs, clone.firstChild);
-
-        if (cb) {
-          var outHtml = outer.innerHTML;
-          outHtml = outHtml.replace(/NS\d+:href/gi, 'xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href');
-          cb(outHtml, width, height);
-        }
+      if (cb) {
+        var xmlDocAsString = new XMLSerializer().serializeToString(xmlDoc);
+        cb(xmlDocAsString, width, height);
       }
     });
   }
 
   out$.svgAsDataUri = function(el, options, cb) {
     out$.prepareSvg(el, options, function(svg) {
-      var uri = 'data:image/svg+xml;base64,' + window.btoa(reEncode(doctype + svg));
+      var uri = 'data:image/svg+xml;base64,' + window.btoa(reEncode(svg));
       if (cb) {
         cb(uri);
       }
@@ -379,7 +347,7 @@
       canvas.height *= pixelRatio;
 
       context.setTransform(pixelRatio,0,0,pixelRatio,0,0);
-      
+
       if(options.canvg) {
         options.canvg(canvas, src);
       } else {
@@ -403,7 +371,11 @@
           throw e;
         }
       }
-      cb(png);
+      var blah = new Image();
+      blah.onload = function () {
+        cb(png);
+      };
+      blah.src = png;
     }
 
     if(options.canvg) {
