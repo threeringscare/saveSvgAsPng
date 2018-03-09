@@ -334,48 +334,69 @@
     options.encoderOptions = options.encoderOptions || 0.8;
 
     var convertToPng = function(src, w, h) {
+      // Initialise a canvas with the width and height of the source (as
+      // provided).
       var canvas = document.createElement('canvas');
       var context = canvas.getContext('2d');
       canvas.width = w;
       canvas.height = h;
 
+      // What sort of density does the current device have?
       var pixelRatio = window.devicePixelRatio || 1;
 
-      canvas.style.width = canvas.width +'px';
-      canvas.style.height = canvas.height +'px';
+      // Expand the canvas if necessary to produce an output of sufficient
+      // resolution for the current device's pixel density. Ensure it's rendered
+      // in a box the width and height of the original so we get the proper
+      // visible outcome.
       canvas.width *= pixelRatio;
       canvas.height *= pixelRatio;
+      canvas.style.width = w +'px';
+      canvas.style.height = h +'px';
 
-      context.setTransform(pixelRatio,0,0,pixelRatio,0,0);
-
-      if(options.canvg) {
-        options.canvg(canvas, src);
-      } else {
-        context.drawImage(src, 0, 0);
-      }
-
-      if(options.backgroundColor){
-        context.globalCompositeOperation = 'destination-over';
-        context.fillStyle = options.backgroundColor;
-        context.fillRect(0, 0, canvas.width, canvas.height);
-      }
-
-      var png;
-      try {
-        png = canvas.toDataURL(options.encoderType, options.encoderOptions);
-      } catch (e) {
-        if ((typeof SecurityError !== 'undefined' && e instanceof SecurityError) || e.name == "SecurityError") {
-          console.error("Rendered SVG images cannot be downloaded in this browser.");
-          return;
-        } else {
-          throw e;
+      var scaleFactor = options.scaleFactor || 0.75;
+      var png = '';
+      var aspectRatio = w / (h * 1.0);
+      var attempts = 1;
+      while (png.length < 50 && Math.min(canvas.width, canvas.height) >= 1) {
+        if (options.debug) {
+          console.log('Render attempt %d at w:%f/h:%f (area:%f).', attempts,
+            canvas.width, canvas.height, (canvas.width * canvas.height));
         }
+
+        try {
+          // Ensure the content is rendered to fill the canvas.
+          var renderRatio = canvas.width / w;
+          context.setTransform(renderRatio,0,0,renderRatio,0,0);
+
+          // Draw the main event to the canvas.
+          context.drawImage(src, 0, 0);
+
+          // If asked to, render a solid background colour.
+          if (options.backgroundColor) {
+            context.globalCompositeOperation = 'destination-over';
+            context.fillStyle = options.backgroundColor;
+            context.fillRect(0, 0, w, h);
+          }
+
+          // Canvas to image.
+          png = canvas.toDataURL(options.encoderType, options.encoderOptions);
+        } catch (e) {
+          if (options.debug) {
+            console.error(
+              'Exception when producing output image. Could be a max-size ' +
+              'violation so will continue trying for a while.\n%o', e);
+          }
+        }
+
+        // Reduce canvas area by scale factor in case we need to go around
+        // again.
+        canvas.width = Math.sqrt(
+          (canvas.width * canvas.height * scaleFactor) * aspectRatio);
+        canvas.height = canvas.width / aspectRatio;
+        attempts += 1;
       }
-      var blah = new Image();
-      blah.onload = function () {
-        cb(png);
-      };
-      blah.src = png;
+
+      cb(png);
     }
 
     if(options.canvg) {
